@@ -15,51 +15,48 @@ class GroceryList extends StatefulWidget {
 }
 
 class _GroceryListState extends State<GroceryList> {
-  List<GroceryItem> _groceryItems = [];
-  bool _isLoading = true;
+  final List<GroceryItem> _groceryItems = [];
+  late Future<List<GroceryItem>> _loadedItems;
 
   @override
   void initState() {
     super.initState();
-    _loadItems();
+    _loadedItems = _loadItems();
   }
 
-  void _loadItems() async {
+  Future<List<GroceryItem>> _loadItems() async {
     final url = Uri.https(
       'flutter-api-fa6f7-default-rtdb.firebaseio.com',
       'shopping-list.json',
     );
 
-    await http.get(url).then((response) {
-      if(response.body == 'null') {
-        setState(() {
-          _isLoading = false;
-        });
-        return;
-      }
+    final response = await http.get(url);
+    if (response.statusCode >= 400) {
+      throw Exception('An error has occured. Please try again later');
+    }
 
-      final Map<String, dynamic> listData = json.decode(response.body);
-      final List<GroceryItem> loadedItems = [];
-      for (var item in listData.entries) {
-        final category =
-            categories.entries
-                .firstWhere((cat) => cat.value.name == item.value['category'])
-                .value;
-        loadedItems.add(
-          GroceryItem(
-            id: item.key,
-            name: item.value['name'],
-            quantity: item.value['quantity'],
-            category: category,
-          ),
-        );
-      }
+    if (response.body == 'null') {
+      return [];
+    }
 
-      setState(() {
-        _groceryItems = loadedItems;
-        _isLoading = false;
-      });
-    });
+    final Map<String, dynamic> listData = json.decode(response.body);
+    final List<GroceryItem> loadedItems = [];
+    for (var item in listData.entries) {
+      final category =
+          categories.entries
+              .firstWhere((cat) => cat.value.name == item.value['category'])
+              .value;
+      loadedItems.add(
+        GroceryItem(
+          id: item.key,
+          name: item.value['name'],
+          quantity: item.value['quantity'],
+          category: category,
+        ),
+      );
+    }
+
+    return loadedItems;
   }
 
   void _addItem() async {
@@ -85,7 +82,7 @@ class _GroceryListState extends State<GroceryList> {
 
     final response = await http.delete(url);
 
-    if(response.statusCode >= 400) {
+    if (response.statusCode >= 400) {
       setState(() {
         _groceryItems.add(item);
       });
@@ -94,28 +91,36 @@ class _GroceryListState extends State<GroceryList> {
 
   @override
   Widget build(BuildContext context) {
-    Widget mainContent = Center(child: Text('No grocery items yet'));
-
-    if(_isLoading) {
-      mainContent = Center(child: CircularProgressIndicator(),);
-    }
-
-    if (_groceryItems.isNotEmpty) {
-      mainContent = ListView.builder(
-        itemCount: _groceryItems.length,
-        itemBuilder:
-            (context, index) => GroceryItemWidget(
-              _groceryItems[index],
-              onDismissed: removeItem,
-            ),
-      );
-    }
     return Scaffold(
       appBar: AppBar(
         title: Text("Your Groceries"),
         actions: [IconButton(onPressed: _addItem, icon: const Icon(Icons.add))],
       ),
-      body: mainContent,
+      body: FutureBuilder(
+        future: _loadedItems,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(child: CircularProgressIndicator());
+          }
+
+          if (snapshot.hasError) {
+            return Center(child: Text(snapshot.error.toString()));
+          }
+
+          if (snapshot.data!.isEmpty) {
+            return Center(child: Text('No grocery items yet'));
+          }
+
+          return ListView.builder(
+            itemCount: snapshot.data!.length,
+            itemBuilder:
+                (context, index) => GroceryItemWidget(
+                  snapshot.data![index],
+                  onDismissed: removeItem,
+                ),
+          );
+        },
+      ),
     );
   }
 }
